@@ -30,7 +30,7 @@ class DataCollector:
             'h_bond_bridging': 'Does not form hydrogen bonds between its parts.'
         }
         self.start_of_sent = \
-            'Give me a molecule that satisfies the conditions outlined in the description: '
+            ''
 
 
     def make_sentence(self, save_to: str) -> pd.DataFrame:
@@ -62,7 +62,7 @@ class DataCollector:
 
         return self.res_dfrm
 
-    def add_smiles_token(self, dfrm: pd.DataFrame, path_to_save: Union[bool, str] = False, cut: bool = False) -> pd.DataFrame:
+    def add_smiles_token(self, dfrm: pd.DataFrame, path_to_save: Union[bool, str] = False, cut: Union[bool, int] = False) -> pd.DataFrame:
         structures = dfrm['output'].values.tolist()
         for idx, structure in enumerate(structures):
             structures[idx] = '<SMILES> ' + structure + ' </SMILES>'
@@ -70,7 +70,10 @@ class DataCollector:
         dfrm['output'] = structures
 
         if path_to_save:
-            dfrm.to_csv(path_to_save)
+            if type(cut) == int:
+                dfrm = dfrm.sample(frac=1).reset_index(drop=True).head(cut).to_csv(path_to_save)
+            else:
+                dfrm = dfrm.sample(frac=1).reset_index(drop=True).to_csv(path_to_save)
         return dfrm
 
     def generate_combinations(self) -> list:
@@ -106,5 +109,5 @@ if __name__ == "__main__":
     path = '/home/user/PycharmProjects/SmilesTuneMistral/data/database_ChEMBL_performace.csv'
     save_to = '/home/user/PycharmProjects/SmilesTuneMistral/data/props_in_sentences_ChEMBL.csv'
     dc = DataCollector(path)
-    combinations = dc.generate_combinations()
+    combinations = dc.make_sentence(save_to)
 

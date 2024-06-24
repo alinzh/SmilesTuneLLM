@@ -11,6 +11,13 @@ from unsloth import FastLanguageModel
 
 from data_massage.data_collector import DataCollector
 
+alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. 
+Write a response that appropriately completes the request.
+### Input:
+{}
+### Response:
+{}"""
+
 
 class CheckpointCallback(TrainerCallback):
     def __init__(self, checkpoint_dir, save_steps=100):
@@ -37,7 +44,7 @@ class MistralRunner:
         max_seq_length: int = 1024,
         dtype=None,
         load_in_4bit: bool = True,
-        lora_name: str = "lora_model_2",
+        lora_name: str = "lora_model_no_prop",
         steps: Union[int, bool] = None,
     ) -> None:
         self.max_seq_length = max_seq_length
@@ -48,6 +55,7 @@ class MistralRunner:
         self.model, self.tokenizer, self.dataset = None, None, None
         self.lora_name = lora_name
         self.steps_for_train = steps
+        self.instruct = 'Give me a molecule that satisfies the conditions outlined in the description: '
 
     def get_model_tokenizer(self, load_from_dir: bool = False):
         if load_from_dir:
@@ -91,12 +99,16 @@ class MistralRunner:
         BOS_TOKEN = self.tokenizer.bos_token
 
         def formatting_prompts_func(examples):
+            # instruction = 'Give me a molecule that satisfies the conditions outlined in the description: '
             outputs = examples["output"]
-            inputs = examples["input"]
+            # inputs = examples["input"]
+            # inputs = "Give me a new molecule"
             texts = []
             for i, output in enumerate(outputs):
                 # Must add EOS_TOKEN, otherwise your generation will go on forever!
-                text = BOS_TOKEN + inputs[i] + output + EOS_TOKEN
+                # text = BOS_TOKEN + alpaca_prompt.format(inputs, output) + EOS_TOKEN
+                text = BOS_TOKEN + output + EOS_TOKEN
+
                 texts.append(text)
             return {
                 "text": texts,
@@ -111,6 +123,7 @@ class MistralRunner:
             )
         else:
             dataset = load_dataset("csv", data_files=path_to_ds, split="train")
+            dataset = dataset.select(range(10000))  # TODO: rm hardcode!!!
         self.dataset = dataset.map(
             formatting_prompts_func,
             batched=True,
@@ -176,17 +189,17 @@ class MistralRunner:
             f"Peak reserved memory for training % of max memory = {lora_percentage} %."
         )
 
-        trainer.model.save_pretrained("lora_model_2")  # Local saving
-        self.tokenizer.save_pretrained("lora_model_2")
+        trainer.model.save_pretrained("lora_model_no_prop")  # Local saving
+        self.tokenizer.save_pretrained("lora_model_no_prop")
 
         return trainer
 
     def generator(
-        self, load=True, num_answers: int = 20
+        self, load: bool = True, num_answers: int = 20
     ):
         if load:
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
-                model_name=self.lora_name,
+                model_name="lora_model_no_prop",
                 max_seq_length=1024,
                 dtype=None,
                 load_in_4bit=True,
@@ -197,11 +210,15 @@ class MistralRunner:
             FastLanguageModel.for_inference(self.model)
 
         for idx, input in enumerate(DataCollector().generate_combinations()):
+            # inputs = self.tokenizer(
+            #     [''],
+            #     return_token_type_ids=False,
+            #     return_tensors="pt",
+            # ).to("cuda")
             inputs = self.tokenizer(
-                [input],
-                return_token_type_ids=False,
-                return_tensors="pt",
-            ).to("cuda")
+            [
+                    "<|begin_of_text|>"
+            ], return_token_type_ids=False, return_tensors="pt").to("cuda")
 
             gens = []
 
@@ -211,7 +228,7 @@ class MistralRunner:
                     **inputs, streamer=text_streamer, use_cache=True, max_new_tokens=128
                 )
                 gens.append(self.tokenizer.decode(out.cpu()[0]))
-                print(out)
+                print(self.tokenizer.decode(out.cpu()[0]))
 
             pd.DataFrame(gens).to_csv(f'./outputs/output_{idx}.csv', index=False)
 
@@ -220,7 +237,6 @@ class MistralRunner:
         load_from_dir_model: bool,
         checkp_dir: str,
         save_steps: int,
-        answer_path: Union[bool, str] = False,
         epoch: float = 1.0,
         ds_path: Union[str, bool] = False,
     ):
@@ -234,9 +250,6 @@ class MistralRunner:
             ds = self.get_ds(True, ds_path)
         trainer = self.tune(checkpoint_callback, epoch)
 
-        if answer_path:
-            self.generator(answer_path, load=not(load_from_dir_model))
-
 
 if __name__ == "__main__":
     save_steps = 50
@@ -247,16 +260,14 @@ if __name__ == "__main__":
 
     dfrm = (
         DataCollector()
-        .add_smiles_token(pd.read_csv(ds_path), cut=True)
+        .add_smiles_token(pd.read_csv(ds_path), cut=10000)
         .to_csv(new_ds_path)
     )
-    # MistralRunner(steps=500).run_tune(
-    #     True,
-    #     checkp_dir,
-    #     save_steps,
-    #     answer_path,
-    #     ds_path=new_ds_path,
-    #     epoch=0.000000001,
-    # )
+    MistralRunner(steps=200).run_tune(
+        False,
+        checkp_dir,
+        save_steps,
+        ds_path=new_ds_path
+    )
 
     MistralRunner().generator()
