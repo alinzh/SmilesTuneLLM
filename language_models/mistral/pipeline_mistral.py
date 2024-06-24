@@ -37,7 +37,7 @@ class MistralRunner:
         max_seq_length: int = 1024,
         dtype=None,
         load_in_4bit: bool = True,
-        lora_name: str = "lora_model",
+        lora_name: str = "lora_model_2",
         steps: Union[int, bool] = None,
     ) -> None:
         self.max_seq_length = max_seq_length
@@ -182,7 +182,7 @@ class MistralRunner:
         return trainer
 
     def generator(
-        self, answer_path: str, load=True, trainer=None, num_answers: int = 100
+        self, load=True, num_answers: int = 20
     ):
         if load:
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
@@ -194,32 +194,26 @@ class MistralRunner:
             FastLanguageModel.for_inference(self.model)
         else:
             self.model.generate()
-            FastLanguageModel.for_inference(
-                trainer.model
-            )  # Enable native 2x faster inference
+            FastLanguageModel.for_inference(self.model)
 
-        inputs = self.tokenizer(
-            [
-                "Give me a molecule that satisfies the conditions outlined in the description: "
-                "The molecule has no obstructions (all parts are easily accessible)."
-                "Does not have orthogonal planes (parts of the molecule are not oriented at right "
-                "angles to each other)Does not form hydrogen bonds between its parts"
-            ],
-            return_token_type_ids=False,
-            return_tensors="pt",
-        ).to("cuda")
+        for idx, input in enumerate(DataCollector().generate_combinations()):
+            inputs = self.tokenizer(
+                [input],
+                return_token_type_ids=False,
+                return_tensors="pt",
+            ).to("cuda")
 
-        gens = []
+            gens = []
 
-        text_streamer = TextStreamer(self.tokenizer)
-        for i in tqdm(range(num_answers)):
-            out = self.model.generate(
-                **inputs, streamer=text_streamer, use_cache=True, max_new_tokens=128
-            )
-            gens.append(self.tokenizer.decode(out.cpu()[0]))
+            text_streamer = TextStreamer(self.tokenizer)
+            for i in tqdm(range(num_answers)):
+                out = self.model.generate(
+                    **inputs, streamer=text_streamer, use_cache=True, max_new_tokens=128
+                )
+                gens.append(self.tokenizer.decode(out.cpu()[0]))
+                print(out)
 
-        res = pd.DataFrame(gens).to_csv(answer_path)
-        print(res)
+            pd.DataFrame(gens).to_csv(f'./outputs/output_{idx}.csv', index=False)
 
     def run_tune(
         self,
@@ -241,7 +235,7 @@ class MistralRunner:
         trainer = self.tune(checkpoint_callback, epoch)
 
         if answer_path:
-            self.generator(answer_path)
+            self.generator(answer_path, load=not(load_from_dir_model))
 
 
 if __name__ == "__main__":
@@ -256,11 +250,13 @@ if __name__ == "__main__":
         .add_smiles_token(pd.read_csv(ds_path), cut=True)
         .to_csv(new_ds_path)
     )
-    MistralRunner(steps=500).run_tune(
-        True,
-        checkp_dir,
-        save_steps,
-        answer_path,
-        ds_path=new_ds_path,
-        epoch=0.000000001,
-    )
+    # MistralRunner(steps=500).run_tune(
+    #     True,
+    #     checkp_dir,
+    #     save_steps,
+    #     answer_path,
+    #     ds_path=new_ds_path,
+    #     epoch=0.000000001,
+    # )
+
+    MistralRunner().generator()
