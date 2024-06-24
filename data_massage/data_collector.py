@@ -1,5 +1,6 @@
 import pandas as pd
 from typing import Union
+import itertools
 
 
 class DataCollector:
@@ -28,6 +29,9 @@ class DataCollector:
                                  'oriented at right angles to each other)',
             'h_bond_bridging': 'Does not form hydrogen bonds between its parts.'
         }
+        self.start_of_sent = \
+            'Give me a molecule that satisfies the conditions outlined in the description: '
+
 
     def make_sentence(self, save_to: str) -> pd.DataFrame:
         """
@@ -35,10 +39,9 @@ class DataCollector:
         Save DataFrame to csv file.
         """
         sentences = []
-        start_of_sent = 'Give me a molecule that satisfies the conditions outlined in the description: '
 
         for row in self.data.values.tolist():
-            promt = start_of_sent
+            promt = self.start_of_sent
             if row[1]:
                 promt += self.conditions_true['unobstructed']
             else:
@@ -70,10 +73,38 @@ class DataCollector:
             dfrm.to_csv(path_to_save)
         return dfrm
 
+    def generate_combinations(self) -> list:
+        """
+        Generates all possible combinations of properties for promt
+
+        Returns
+        -------
+        store : list
+            All possible combinations of properties
+        """
+        all_conditions = []
+        keys = list(self.conditions_true.keys())
+
+        # Generate all possible combinations of True/False for the conditions
+        for combination in itertools.product([True, False], repeat=len(keys)):
+            condition_set = {}
+            for key, is_true in zip(keys, combination):
+                condition_set[key] = self.conditions_true[key] if is_true else self.conditions_false[key]
+            all_conditions.append(condition_set)
+
+        store = []
+        for i, combination in enumerate(all_conditions):
+            promt = self.start_of_sent
+            for value in combination.values():
+                promt += value
+            store.append(promt)
+
+        return store
+
 
 if __name__ == "__main__":
     path = '/home/user/PycharmProjects/SmilesTuneMistral/data/database_ChEMBL_performace.csv'
     save_to = '/home/user/PycharmProjects/SmilesTuneMistral/data/props_in_sentences_ChEMBL.csv'
     dc = DataCollector(path)
-    dc.make_sentence(save_to)
+    combinations = dc.generate_combinations()
 

@@ -245,7 +245,7 @@ class MistralRunner:
 
 
 if __name__ == "__main__":
-    save_steps = 100
+    save_steps = 50
     checkp_dir = "./checkpoints"
     answer_path = "./answer_mistral"
     ds_path = "/home/user/PycharmProjects/SmilesTuneMistral/data/props_in_sentences_ChEMBL.csv"
