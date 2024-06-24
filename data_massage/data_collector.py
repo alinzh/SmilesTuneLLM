@@ -1,19 +1,21 @@
 import pandas as pd
+from typing import Union
 
 
 class DataCollector:
-    def __init__(self, path_to_csv: str):
+    def __init__(self, path_to_csv: Union[str, bool] = False):
         """
         Parameters
         ----------
-        path_to_csv : str
+        path_to_csv : Union[str, bool], optional
             Path to csv file. Consist of next column:
             0, unobstructed, orthogonal_planes, h_bond_bridging, 0.1
             0 - index
             0.1 - is structure
         """
-        self.data = pd.read_csv(path_to_csv, sep=',')
-        self.res_dfrm = self.data.copy()
+        if path_to_csv:
+            self.data = pd.read_csv(path_to_csv, sep=',')
+            self.res_dfrm = self.data.copy()
         self.conditions_true = {
             'unobstructed': 'The molecule has no obstructions (all parts are easily accessible).',
             'orthogonal_planes': 'Has orthogonal planes (parts of the molecule are oriented at right '
@@ -51,16 +53,27 @@ class DataCollector:
                 promt += self.conditions_false['h_bond_bridging']
             sentences.append(promt)
 
-        self.res_dfrm['sentence'] = sentences
-        self.res_dfrm.rename(columns={'0.1': 'structure'}, inplace=True)
+        self.res_dfrm['input'] = sentences
+        self.res_dfrm.rename(columns={'0.1': 'output'}, inplace=True)
         self.res_dfrm.to_csv(save_to)
 
         return self.res_dfrm
 
+    def add_smiles_token(self, dfrm: pd.DataFrame, path_to_save: Union[bool, str] = False, cut: bool = False) -> pd.DataFrame:
+        structures = dfrm['output'].values.tolist()
+        for idx, structure in enumerate(structures):
+            structures[idx] = '<SMILES> ' + structure + ' </SMILES>'
+
+        dfrm['output'] = structures
+
+        if path_to_save:
+            dfrm.to_csv(path_to_save)
+        return dfrm
+
 
 if __name__ == "__main__":
     path = '/home/user/PycharmProjects/SmilesTuneMistral/data/database_ChEMBL_performace.csv'
-    save_to = '/home/user/PycharmProjects/SmilesTuneMistral/data/props_in_sentences.csv'
+    save_to = '/home/user/PycharmProjects/SmilesTuneMistral/data/props_in_sentences_ChEMBL.csv'
     dc = DataCollector(path)
     dc.make_sentence(save_to)
 
