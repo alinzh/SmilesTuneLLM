@@ -173,7 +173,6 @@ class MistralRunner():
                 self.generator(answer_path)
 
 
-
 if __name__ == "__main__":
     checkp_dir = "PATH_TO_DIR"
     answer_path = "PATH_TO_FILE_IN_TXT_FORMAT"
