@@ -106,7 +106,7 @@ class DataCollector:
 
 
 if __name__ == "__main__":
-    path = '/home/user/PycharmProjects/SmilesTuneMistral/data/database_ChEMBL_performace.csv'
+    path = '/data/database_ChEMBL_performace.csv'
     save_to = '/home/user/PycharmProjects/SmilesTuneMistral/data/props_in_sentences_ChEMBL.csv'
     dc = DataCollector(path)
     combinations = dc.make_sentence(save_to)
