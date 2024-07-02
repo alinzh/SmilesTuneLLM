@@ -4,7 +4,7 @@ from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers import Tokenizer, trainers
 import pandas as pd
-import torch.nn.functional as F
+from tqdm import tqdm
 import pickle
 
 sys.path.append('..')
@@ -71,7 +71,7 @@ class xLSTM():
         super().__init__()
         self.model = xLSTMLMModel(cfg).to(DEVICE)
 
-    def train(self, dataloader, epoch=1, totall_steps=50):
+    def train(self, dataloader, epoch=5, total_steps=50):
         cnt = 0
         mean_loss = 0
 
@@ -79,33 +79,34 @@ class xLSTM():
             self.model.parameters(), lr=0.0006479739574204421, weight_decay=5e-4
         )
 
-        for i in range(epoch):
+        for i in tqdm(range(epoch), desc="Epochs"):
             for batch_num, inputs in enumerate(dataloader):
-
                 self.model.train()
                 optimizer.zero_grad()
 
-                with torch.autocast(device_type='cuda', enabled=True):
-                    for idx, sentence in enumerate(inputs):
-                        for i in range(len(sentence) - 3):
-                            current_input, label = sentence[i + 2].unsqueeze(dim=0).unsqueeze(dim=0), sentence[i + 3]
-                            output = self.model(current_input.to(DEVICE))
-                            pred = F.softmax(output.squeeze(dim=0).squeeze(dim=0))
-                            loss = nn.functional.cross_entropy(pred, label.to(DEVICE))
-                            loss.backward()
-                            optimizer.step()
-                            mean_loss += loss
-                            cnt += 1
-                        print(f"--------Mean loss for step {(idx + 1) * (1 + batch_num)} is {mean_loss / cnt}--------")
-                    if idx >= totall_steps:
-                        return
+                inputs = inputs.to(DEVICE)
+                outputs = self.model(inputs)
+
+                # Move for one token in right to predict next
+                targets = inputs[:, 1:].contiguous().view(-1)
+                outputs = outputs[:, :-1].contiguous().view(-1, outputs.size(-1))
+
+                loss = nn.functional.cross_entropy(outputs, targets)
+                loss.backward()
+                optimizer.step()
+                mean_loss += loss.item()
+                cnt += inputs.size(0)
+
+                print(f"--------Mean loss for step {(batch_num + 1) * (i + 1)} is {mean_loss / cnt}--------")
+                # if batch_num >= total_steps:
+                #     return
 
     def saver(self):
         torch.save(model.model.state_dict(), "./weights/xlstm_parms.pth")
 
 
 if __name__ == "__main__":
-    data_path='/home/alina/data/projects/SmilesTuneLLM/chembl_alpaca.txt'
+    data_path='/data/alina_files/projects/SmilesTuneLLM/chembl_alpaca copy.txt'
     xlstm_cfg =""" 
     vocab_size: 600
     context_length: 64      
@@ -122,7 +123,10 @@ if __name__ == "__main__":
     cfg = OmegaConf.create(xlstm_cfg)
     cfg = from_dict(data_class=xLSTMLMModelConfig, data=OmegaConf.to_container(cfg), config=DaciteConfig(strict=True))
 
-    tokenizer = make_tokenizer(data_path=data_path, max_length=64, vocab_size=600)
+    tokenizer = make_tokenizer(
+        data_path=data_path, max_length=64, vocab_size=600,
+        path_to_saved='/data/alina_files/projects/SmilesTuneLLM/xlstm/experiments/tokenizer.pickle'
+    )
 
     train_ds = Dataset()
     train_loader = torch.utils.data.DataLoader(train_ds, batch_size=1, shuffle=False)
