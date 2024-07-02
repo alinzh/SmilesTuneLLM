@@ -4,6 +4,7 @@ from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers import Tokenizer, trainers
 import pandas as pd
+import torch.nn.functional as F
 from tqdm import tqdm
 import pickle
 
@@ -97,12 +98,15 @@ class xLSTM():
                 mean_loss += loss.item()
                 cnt += inputs.size(0)
 
-                print(f"--------Mean loss for step {(batch_num + 1) * (i + 1)} is {mean_loss / cnt}--------")
+                if batch_num % 200 == 0:
+                    print(f"--------Mean loss for step {(batch_num + 1) * (i + 1)} is {mean_loss / cnt}--------")
+                    self.saver()
                 # if batch_num >= total_steps:
                 #     return
+        self.saver()
 
     def saver(self):
-        torch.save(model.model.state_dict(), "./weights/xlstm_parms.pth")
+        torch.save(self.model.state_dict(), "./weights/xlstm_parms.pth")
 
 
 if __name__ == "__main__":
@@ -133,4 +137,3 @@ if __name__ == "__main__":
 
     model = xLSTM(cfg)
     model.train(train_loader)
-    model.saver()
