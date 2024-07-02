@@ -109,8 +109,8 @@ if __name__ == "__main__":
     xlstm_cfg =""" 
     vocab_size: 600
     context_length: 64      
-    num_blocks: 24 #!
-    embedding_dim: 600 #!
+    num_blocks: 24
+    embedding_dim: 64
     tie_weights: false
     weight_decay_on_embedding: false
     mlstm_block:
