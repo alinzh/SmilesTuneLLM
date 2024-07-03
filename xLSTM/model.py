@@ -77,7 +77,7 @@ class Generator(xLSTM):
         self.model.eval()
         self.tokenizer = make_tokenizer()
 
-    def generate(self, start_token: str, max_length: int = 128, num_answers: int = 1, temperature: float = 2.0):
+    def generate(self, start_token: str, max_length: int = 128, num_answers: int = 1, temperature: float = 0.8):
         """
         Generate sequence
 

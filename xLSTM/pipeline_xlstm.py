@@ -44,7 +44,7 @@ def run(
         )
         train_ds = SmilesDataset(tokenizer, dataset_path)
         train_loader = DataLoader(
-            train_ds, batch_size=256, shuffle=False
+            train_ds, batch_size=280, shuffle=False
         )
 
         model = xLSTM(cfg_path)
@@ -54,7 +54,7 @@ def run(
         model_gen = Generator(cfg_path)
         results = model_gen.generate(start_token="[PAD]", num_answers=num_answers)
         [print(result) for result in results]
-        with open(f"examples/out_500_2.txt", "w") as f:
+        with open(f"examples/out_500_3.txt", "w") as f:
             for res in results:
                 f.write(res + "\n")
 
@@ -63,5 +63,5 @@ if __name__ == "__main__":
     data_path = "/data/alina_files/projects/2/SmilesTuneLLM/data/chembl_alpaca.txt"
     cfg_path = "/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_cfg.yaml"
     run(
-        cfg_path, is_fine_tuning=False, is_generating=True, dataset_path=data_path
+        cfg_path, is_fine_tuning=True, is_generating=False, dataset_path=data_path
     )
