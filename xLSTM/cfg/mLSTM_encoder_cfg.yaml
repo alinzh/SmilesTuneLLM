@@ -1,0 +1,12 @@
+vocab_size: 60000
+context_length: 64
+num_blocks: 5
+embedding_dim: 64
+tie_weights: false
+weight_decay_on_embedding: false
+
+mlstm_block:
+  mlstm:
+    conv1d_kernel_size: 4
+    qkv_proj_blocksize: 4
+    num_heads: 4

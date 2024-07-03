@@ -12,7 +12,53 @@ from xlstm.xlstm.xlstm_lm_model import xLSTMLMModel, xLSTMLMModelConfig
 from xLSTM.tokenizer import make_tokenizer
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+
+
+def make_conf(path: str) -> xLSTMLMModelConfig:
+    with open(path, "r", encoding="utf8") as fp:
+        config_yaml = fp.read()
+    cfg = OmegaConf.create(config_yaml)
+    cfg = from_dict(
+        data_class=xLSTMLMModelConfig,
+        data=OmegaConf.to_container(cfg),
+        config=DaciteConfig(strict=True),
+    )
+    return cfg
+
+
+class Encoder(nn.Module):
+    def __init__(self, seq_len, n_features):
+        super(Encoder, self).__init__()
+
+        self.seq_len = seq_len
+        self.n_features = n_features
+        self.hidden_dim = 4 * 64
+
+        self.rnn1 = nn.LSTM(
+          input_size=128,
+          hidden_size=self.hidden_dim,
+          num_layers=8,
+          batch_first=True  # True = (batch_size, seq_len, n_features)
+                            # False = (seq_len, batch_size, n_features)
+                            #default = false
+        )
+        self.rnn2 = nn.LSTM(
+          input_size=self.hidden_dim,
+          hidden_size=128,
+          num_layers=8,
+          batch_first=True
+        )
+
+    def forward(self, x):
+        #(4,1)
+        x = x.reshape((1, 128)).float()
+        # (batch, seq, feature)   #(1,4,1)
+        x, (_, _) = self.rnn1(x) #(1,4,256)
+        x, (hidden_n, _) = self.rnn2(x)
+        # x shape (1,4,128)
+        # hidden_n (1,1,128)
+        return x
 
 
 class xLSTM():
@@ -67,6 +113,22 @@ class xLSTM():
     def saver(self):
         """Save model weights"""
         torch.save(self.model.state_dict(), "./weights/xlstm_parms.pth")
+
+
+class AutoEncoder(nn.Module):
+    def __init__(self, conf_decoder: str):
+        super(AutoEncoder, self).__init__()
+        self.encoder = Encoder(128, 1).to(DEVICE)
+        self.decoder = xLSTMLMModel(make_conf(conf_decoder)).to(DEVICE)
+        self.relu = nn.ReLU()
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            x = self.encoder(inputs)
+            # TODO: fix loss gradient (there are input in int)
+            # x_scaled = torch.tensor([[int(i * 10000) for i in x.tolist()[k]] for k in range(len(x))]).unsqueeze(0).to(DEVICE)
+            # x_scaled = self.relu(x_scaled)
+            # x = self.decoder(x_scaled.to(torch.int))
+            return x
 
 
 class Generator(xLSTM):

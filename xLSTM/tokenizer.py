@@ -9,7 +9,7 @@ from tokenizers.pre_tokenizers import Whitespace
 
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 
 
 def make_tokenizer(
