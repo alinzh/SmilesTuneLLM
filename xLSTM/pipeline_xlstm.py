@@ -148,7 +148,7 @@ class Generator(xLSTM):
         self.model.eval()
         self.tokenizer = make_tokenizer()
 
-    def generate(self, start_token: str, max_length: int = 64, num_answers: int = 1, temperature: float = 1.0):
+    def generate(self, start_token: str, max_length: int = 64, num_answers: int = 1, temperature: float = 0.8):
         """
         Generate sequence
 
@@ -237,14 +237,14 @@ def run(
         model_gen = Generator(cfg_path)
         results = model_gen.generate(start_token="[PAD]", num_answers=num_answers)
         [print(result) for result in results]
-        with open(f"out.txt", "w") as f:
+        with open(f"examples/out_2.txt", "w") as f:
             for res in results:
                 f.write(res + "\n")
 
 
 if __name__ == "__main__":
-    data_path = "/data/alina_files/projects/SmilesTuneLLM/chembl_alpaca copy.txt"
-    cfg_path = "/data/alina_files/projects/SmilesTuneLLM/xlstm/xlstm/cfg/mLSTM_cfg.yaml"
+    data_path = "/data/alina_files/projects/2/SmilesTuneLLM/data/chembl_alpaca.txt"
+    cfg_path = "/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_cfg.yaml"
     run(
         cfg_path, is_fine_tuning=False, is_generating=True, dataset_path=data_path
     )
