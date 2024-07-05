@@ -30,51 +30,19 @@ def make_conf(path: str) -> xLSTMLMModelConfig:
     return cfg
 
 
-# # example here https://www.kaggle.com/code/eunpyohong/bearing-sensor-use-lstm-autoencoder-with-pytorch
-# class Encoder(nn.Module):
-#     def __init__(self, seq_len, n_features):
-#         super(Encoder, self).__init__()
-
-#         self.seq_len = seq_len
-#         self.n_features = n_features
-#         self.hidden_dim = 2 * 128
-
-#         self.rnn1 = nn.LSTM(
-#           input_size=n_features,
-#           hidden_size=self.hidden_dim,
-#           num_layers=8,
-#           batch_first=True  # True = (batch_size, seq_len, n_features)
-#                             # False = (seq_len, batch_size, n_features)
-#                             #default = false
-#         )
-#         self.rnn2 = nn.LSTM(
-#           input_size=self.hidden_dim,
-#           hidden_size=128,
-#           num_layers=8,
-#           batch_first=True
-#         )
-
-#     def forward(self, x):
-#         #(4,1)
-#         x = x.reshape((128, 1)).float()
-#         # (batch, seq, feature)   #(1,4,1)
-#         x, (_, _) = self.rnn1(x) #(1,4,256)
-#         x, (hidden_n, _) = self.rnn2(x)
-#         # x shape (1,4,128)
-#         # hidden_n (1,1,128)
-#         return hidden_n.reshape((self.n_features, 8, 128))
-
 class Encoder(nn.Module):
-    def __init__(self, conf_encoder, hidden_dim, latent_dim=1):
+    def __init__(self, conf_encoder, hidden_dim=128, latent_dim=64):
         super(Encoder, self).__init__()
         self.xlstm = xLSTMLMModel(make_conf(conf_encoder)).to(DEVICE)
-        self.fc = nn.Linear(hidden_dim, latent_dim)
+
+        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
+        self.fc_log_var = nn.Linear(hidden_dim, latent_dim)
 
     def forward(self, x):
         x = self.xlstm(x)
-        # x = x.squeeze(0)  # убираем 1-ую размерность для LSTM
-        # latent = self.fc(x).T
-        return x
+        mu = self.fc_mu(x)
+        log_var = self.fc_log_var(x)
+        return mu, log_var
 
 
 class Decoder(nn.Module):
@@ -85,29 +53,41 @@ class Decoder(nn.Module):
         self.output_dim = output_dim
 
     def forward(self, x):
-        # x = self.fc(x).unsqueeze(1)
-        # x = x.repeat(1, 128, 1)
         output = self.lstm(x)
         return output
     
+    def generate_new_data(self, num_samples: int, latent_dim: int = 128):
+        with torch.no_grad():  
+            # make samples from std
+            z = torch.randn(num_samples, latent_dim).to(DEVICE)
+            generated_data = self.forward(z)
+        return generated_data
+       
     
 class AutoEncoder(nn.Module):
     def __init__(self, conf_encoder:str, conf_decoder: str):
         super(AutoEncoder, self).__init__()
         self.encoder = Encoder(conf_encoder, 64)
         self.decoder = Decoder(conf_decoder, 128, 64, 600)
-        self.relu = nn.ReLU()
+
+    def reparameterize(self, mu, log_var):
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return eps.mul(std).add(mu)
+
+    def compute_kl_divergence(self, mu, log_var):
+        return -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-            x = self.encoder(inputs)
-            # TODO: fix loss gradient (there are input in int)
-            # x_scaled = torch.tensor([[int(i * 10000) for i in x.tolist()[k]] for k in range(len(x))]).unsqueeze(0).to(DEVICE)
-            # x_scaled = self.relu(x_scaled)
-            x = self.decoder(x)
-            return x
+        mu, log_var = self.encoder(inputs)
+        z = self.reparameterize(mu, log_var)
+        reconstructed = self.decoder(z)
+        kld = self.compute_kl_divergence(mu, log_var)
+        return reconstructed, kld
 
 
-class xLSTM():
+
+class EncoderDecoder():
     def __init__(self, conf_path: str, path_to_weights: str = "xLSTM/weights/xlstm_parms.pth"):
         with open(conf_path, "r", encoding="utf8") as fp:
             config_yaml = fp.read()
@@ -161,7 +141,7 @@ class xLSTM():
         torch.save(self.model.state_dict(), "xLSTM/weights/xlstm_parms.pth")
 
 
-class Generator(xLSTM):
+class Generator(EncoderDecoder):
     """Generator of sequence"""
     def __init__(self, cfg: str, weights_path: str = "xLSTM/weights/xlstm_parms.pth"):
         super().__init__(cfg)
