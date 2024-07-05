@@ -4,33 +4,33 @@ import sys
 sys.path.append(os.getcwd())
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from xLSTM.metrics import metrics
-from xLSTM.model import AutoEncoder, EncoderDecoder, Generator
-from xLSTM.smiles_dataset import SmilesDataset
 from xLSTM.tokenizer import make_tokenizer
+from xLSTM.model import EncoderDecoder, Generator, AutoEncoder
+from xLSTM.smiles_dataset import SmilesDataset
+from xLSTM.metrics import metrics
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 
 
 def run_auto_encoder(
-    conf_encoder,
-    conf_decoder,
-    dataset_path,
-    epoch=100,
-    is_fine_tuning: bool = True,
-    is_generating: bool = True,
+        conf_encoder: str, conf_decoder: str, dataset_path: str,
+        epoch: int = 100, is_fine_tuning: bool = True, is_generating: bool = True
 ):
+    """
+    Run training and generation for mLSTM-AutoEncoder
+    """
     if is_fine_tuning:
         tokenizer = make_tokenizer(
             data_path=dataset_path, max_length=128, vocab_size=600
         )
         train_ds = SmilesDataset(tokenizer, dataset_path)
-        dataloader = DataLoader(train_ds, batch_size=16, shuffle=False)
+        dataloader = DataLoader(
+            train_ds, batch_size=16, shuffle=False
+        )
 
         model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
         cnt, mean_loss = 0, 0
@@ -44,9 +44,7 @@ def run_auto_encoder(
                 inputs = inputs.to(DEVICE)
                 reconstructed, kld = model(inputs)
 
-                loss, recon_loss, kld = metrics.loss_function(
-                    reconstructed, inputs, kld, beta=1.0
-                )
+                loss, recon_loss, kld = metrics.loss_function(reconstructed, inputs, kld, beta=1.0)
 
                 loss.backward()
                 optimizer.step()
@@ -58,21 +56,31 @@ def run_auto_encoder(
                     print(
                         f"--------Mean loss for step {cnt} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld}--------"
                     )
-                    torch.save(
-                        model.state_dict(), "xLSTM/weights/xlstm_autoencoder.pth"
-                    )
-    # if is_generating:
-    #     model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
-    #     model.decoder.generate_new_data()
+                    torch.save(model.state_dict(), "xLSTM/weights/xlstm_autoencoder.pth")
+    if is_generating:
+        decode_store = []
+        model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
+        model.load_state_dict(torch.load("xLSTM/weights/xlstm_autoencoder.pth", map_location=DEVICE))
+
+        res = model.decoder.generate_new_data(10000)
+        tokenizer = make_tokenizer(
+            data_path=dataset_path, max_length=128, vocab_size=600
+        )
+        for r in res:
+            decode_store.append(tokenizer.decode(r))
+
+        with open(f"xLSTM/examples/generated_mols.txt", "w") as f:
+            for mol in decode_store:
+                mol.write(res + "\n")
 
 
 def run_encoder_decoder(
-    cfg_path: str,
-    is_fine_tuning: bool = False,
-    is_generating: bool = True,
-    dataset_path: str = None,
-    num_answers: int = 500,
-    num_epoch: int = 50,
+        cfg_path: str,
+        is_fine_tuning: bool = False,
+        is_generating: bool = True,
+        dataset_path: str = None,
+        num_answers: int = 500,
+        num_epoch: int = 50
 ):
     """
     Run training or generation
@@ -97,7 +105,9 @@ def run_encoder_decoder(
             data_path=dataset_path, max_length=128, vocab_size=600
         )
         train_ds = SmilesDataset(tokenizer, dataset_path)
-        train_loader = DataLoader(train_ds, batch_size=128, shuffle=False)
+        train_loader = DataLoader(
+            train_ds, batch_size=128, shuffle=False
+        )
 
         model = EncoderDecoder(cfg_path)
         model.train(train_loader, num_epoch)
@@ -116,10 +126,6 @@ if __name__ == "__main__":
     cfg_path = "xLSTM/cfg//mLSTM_cfg.yaml"
 
     # run AutoEncoder (LSTM encoder + mLSTM decoder)
-    encod_conf = (
-        "/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_encoder_cfg.yaml"
-    )
-    decode_conf = (
-        "/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_decoder_cfg.yaml"
-    )
+    encod_conf = '/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_encoder_cfg.yaml'
+    decode_conf = '/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_decoder_cfg.yaml'
     run_auto_encoder(encod_conf, decode_conf, data_path)

@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.append(os.getcwd())
 
 import torch
@@ -55,17 +56,17 @@ class Decoder(nn.Module):
     def forward(self, x):
         output = self.lstm(x)
         return output
-    
+
     def generate_new_data(self, num_samples: int, latent_dim: int = 128):
-        with torch.no_grad():  
+        with torch.no_grad():
             # make samples from std
             z = torch.randn(num_samples, latent_dim).to(DEVICE)
             generated_data = self.forward(z)
         return generated_data
-       
-    
+
+
 class AutoEncoder(nn.Module):
-    def __init__(self, conf_encoder:str, conf_decoder: str):
+    def __init__(self, conf_encoder: str, conf_decoder: str):
         super(AutoEncoder, self).__init__()
         self.encoder = Encoder(conf_encoder, 64)
         self.decoder = Decoder(conf_decoder, 128, 64, 600)
@@ -84,7 +85,6 @@ class AutoEncoder(nn.Module):
         reconstructed = self.decoder(z)
         kld = self.compute_kl_divergence(mu, log_var)
         return reconstructed, kld
-
 
 
 class EncoderDecoder():
@@ -143,6 +143,7 @@ class EncoderDecoder():
 
 class Generator(EncoderDecoder):
     """Generator of sequence"""
+
     def __init__(self, cfg: str, weights_path: str = "xLSTM/weights/xlstm_parms.pth"):
         super().__init__(cfg)
         self.model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
@@ -188,7 +189,7 @@ class Generator(EncoderDecoder):
                         [input_tensor, torch.tensor([[next_token]]).to(DEVICE)], dim=1
                     )
                     if next_token == self.tokenizer.token_to_id(
-                        "[UNK]"
+                            "[UNK]"
                     ):  # [UNK] is the end token
                         break
                 store.append(self.tokenizer.decode(generated_sequence))
