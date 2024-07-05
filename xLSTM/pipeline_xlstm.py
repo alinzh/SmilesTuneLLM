@@ -7,6 +7,8 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import torch.nn as nn
+
 from xLSTM.tokenizer import make_tokenizer
 from xLSTM.model import EncoderDecoder, Generator, AutoEncoder
 from xLSTM.smiles_dataset import SmilesDataset
@@ -29,10 +31,11 @@ def run_auto_encoder(
         )
         train_ds = SmilesDataset(tokenizer, dataset_path)
         dataloader = DataLoader(
-            train_ds, batch_size=16, shuffle=False
+            train_ds, batch_size=128, shuffle=False
         )
 
         model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
+        model.load_state_dict(torch.load("xLSTM/weights/xlstm_autoencoder.pth", map_location=DEVICE))
         cnt, mean_loss = 0, 0
 
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0006, weight_decay=5e-4)
@@ -67,11 +70,14 @@ def run_auto_encoder(
             data_path=dataset_path, max_length=128, vocab_size=600
         )
         for r in res:
-            decode_store.append(tokenizer.decode(r))
+            logits = r / 5
+            # Sample from the distribution
+            sampled_ids = torch.multinomial(torch.nn.functional.softmax(logits, dim=-1).squeeze(), num_samples=1)
+            decode_store.append(tokenizer.decode([i[0] for i in sampled_ids.tolist()]))
 
         with open(f"xLSTM/examples/generated_mols.txt", "w") as f:
             for mol in decode_store:
-                mol.write(res + "\n")
+                f.write(mol + "\n")
 
 
 def run_encoder_decoder(
