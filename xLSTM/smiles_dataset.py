@@ -4,6 +4,9 @@ import pandas as pd
 import torch
 from tokenizers import Tokenizer
 
+import os
+import sys
+sys.path.append(os.getcwd())
 
 class SmilesDataset:
     """Dataset with SMILES structures"""

@@ -1,4 +1,7 @@
 import os
+import sys
+sys.path.append(os.getcwd())
+
 import pickle
 
 import pandas as pd
@@ -13,7 +16,7 @@ DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("
 
 
 def make_tokenizer(
-    data_path: str = None, max_length: int = 128, vocab_size: int = 600, path_to_saved: str = './tokenizer.pickle'
+    data_path: str = None, max_length: int = 128, vocab_size: int = 600, path_to_saved: str = 'xLSTM/tokenizer.pickle'
 ) -> Tokenizer:
     """
     Create a tokenizer

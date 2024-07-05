@@ -1,4 +1,7 @@
 import os
+import sys
+sys.path.append(os.getcwd())
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,7 +11,7 @@ from omegaconf import OmegaConf
 
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from xlstm.xlstm.xlstm_lm_model import xLSTMLMModel, xLSTMLMModelConfig
+from xLSTM.xlstm.xlstm.xlstm_lm_model import xLSTMLMModel, xLSTMLMModelConfig
 from xLSTM.tokenizer import make_tokenizer
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -27,42 +30,85 @@ def make_conf(path: str) -> xLSTMLMModelConfig:
     return cfg
 
 
+# # example here https://www.kaggle.com/code/eunpyohong/bearing-sensor-use-lstm-autoencoder-with-pytorch
+# class Encoder(nn.Module):
+#     def __init__(self, seq_len, n_features):
+#         super(Encoder, self).__init__()
+
+#         self.seq_len = seq_len
+#         self.n_features = n_features
+#         self.hidden_dim = 2 * 128
+
+#         self.rnn1 = nn.LSTM(
+#           input_size=n_features,
+#           hidden_size=self.hidden_dim,
+#           num_layers=8,
+#           batch_first=True  # True = (batch_size, seq_len, n_features)
+#                             # False = (seq_len, batch_size, n_features)
+#                             #default = false
+#         )
+#         self.rnn2 = nn.LSTM(
+#           input_size=self.hidden_dim,
+#           hidden_size=128,
+#           num_layers=8,
+#           batch_first=True
+#         )
+
+#     def forward(self, x):
+#         #(4,1)
+#         x = x.reshape((128, 1)).float()
+#         # (batch, seq, feature)   #(1,4,1)
+#         x, (_, _) = self.rnn1(x) #(1,4,256)
+#         x, (hidden_n, _) = self.rnn2(x)
+#         # x shape (1,4,128)
+#         # hidden_n (1,1,128)
+#         return hidden_n.reshape((self.n_features, 8, 128))
+
 class Encoder(nn.Module):
-    def __init__(self, seq_len, n_features):
+    def __init__(self, conf_encoder, hidden_dim, latent_dim=1):
         super(Encoder, self).__init__()
-
-        self.seq_len = seq_len
-        self.n_features = n_features
-        self.hidden_dim = 4 * 64
-
-        self.rnn1 = nn.LSTM(
-          input_size=128,
-          hidden_size=self.hidden_dim,
-          num_layers=8,
-          batch_first=True  # True = (batch_size, seq_len, n_features)
-                            # False = (seq_len, batch_size, n_features)
-                            #default = false
-        )
-        self.rnn2 = nn.LSTM(
-          input_size=self.hidden_dim,
-          hidden_size=128,
-          num_layers=8,
-          batch_first=True
-        )
+        self.xlstm = xLSTMLMModel(make_conf(conf_encoder)).to(DEVICE)
+        self.fc = nn.Linear(hidden_dim, latent_dim)
 
     def forward(self, x):
-        #(4,1)
-        x = x.reshape((1, 128)).float()
-        # (batch, seq, feature)   #(1,4,1)
-        x, (_, _) = self.rnn1(x) #(1,4,256)
-        x, (hidden_n, _) = self.rnn2(x)
-        # x shape (1,4,128)
-        # hidden_n (1,1,128)
+        x = self.xlstm(x)
+        # x = x.squeeze(0)  # убираем 1-ую размерность для LSTM
+        # latent = self.fc(x).T
         return x
 
 
+class Decoder(nn.Module):
+    def __init__(self, conf_decoder, latent_dim, hidden_dim, output_dim):
+        super(Decoder, self).__init__()
+        self.fc = nn.Linear(latent_dim, hidden_dim)
+        self.lstm = xLSTMLMModel(make_conf(conf_decoder)).to(DEVICE)
+        self.output_dim = output_dim
+
+    def forward(self, x):
+        # x = self.fc(x).unsqueeze(1)
+        # x = x.repeat(1, 128, 1)
+        output = self.lstm(x)
+        return output
+    
+    
+class AutoEncoder(nn.Module):
+    def __init__(self, conf_encoder:str, conf_decoder: str):
+        super(AutoEncoder, self).__init__()
+        self.encoder = Encoder(conf_encoder, 64)
+        self.decoder = Decoder(conf_decoder, 128, 64, 600)
+        self.relu = nn.ReLU()
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            x = self.encoder(inputs)
+            # TODO: fix loss gradient (there are input in int)
+            # x_scaled = torch.tensor([[int(i * 10000) for i in x.tolist()[k]] for k in range(len(x))]).unsqueeze(0).to(DEVICE)
+            # x_scaled = self.relu(x_scaled)
+            x = self.decoder(x)
+            return x
+
+
 class xLSTM():
-    def __init__(self, conf_path: str, path_to_weights: str = "./weights/xlstm_parms.pth"):
+    def __init__(self, conf_path: str, path_to_weights: str = "xLSTM/weights/xlstm_parms.pth"):
         with open(conf_path, "r", encoding="utf8") as fp:
             config_yaml = fp.read()
         cfg = OmegaConf.create(config_yaml)
@@ -112,28 +158,12 @@ class xLSTM():
 
     def saver(self):
         """Save model weights"""
-        torch.save(self.model.state_dict(), "./weights/xlstm_parms.pth")
-
-
-class AutoEncoder(nn.Module):
-    def __init__(self, conf_decoder: str):
-        super(AutoEncoder, self).__init__()
-        self.encoder = Encoder(128, 1).to(DEVICE)
-        self.decoder = xLSTMLMModel(make_conf(conf_decoder)).to(DEVICE)
-        self.relu = nn.ReLU()
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-            x = self.encoder(inputs)
-            # TODO: fix loss gradient (there are input in int)
-            # x_scaled = torch.tensor([[int(i * 10000) for i in x.tolist()[k]] for k in range(len(x))]).unsqueeze(0).to(DEVICE)
-            # x_scaled = self.relu(x_scaled)
-            # x = self.decoder(x_scaled.to(torch.int))
-            return x
+        torch.save(self.model.state_dict(), "xLSTM/weights/xlstm_parms.pth")
 
 
 class Generator(xLSTM):
     """Generator of sequence"""
-    def __init__(self, cfg: str, weights_path: str = "./weights/xlstm_parms.pth"):
+    def __init__(self, cfg: str, weights_path: str = "xLSTM/weights/xlstm_parms.pth"):
         super().__init__(cfg)
         self.model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
         self.model.eval()
