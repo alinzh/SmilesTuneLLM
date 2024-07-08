@@ -1,6 +1,10 @@
+"""
+Run tuning/inference mLSTM EnocderDecoder, AutoEncoder
+"""
 import os
 import sys
 sys.path.append(os.getcwd())
+
 import math
 
 import torch
@@ -8,7 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from xLSTM.tokenizer import make_tokenizer
-from xLSTM.model import EncoderDecoder, Generator, AutoEncoder
+from xLSTM.model import EncoderDecoder, EncoderDecoderGenerator, AutoEncoder
 from xLSTM.smiles_dataset import SmilesDataset
 from xLSTM.metrics import metrics
 
@@ -18,19 +22,46 @@ DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("
 
 def run_auto_encoder(
         conf_encoder: str, conf_decoder: str, dataset_path: str, 
-        epoch: int = 1, is_fine_tuning: bool = True, is_generating: bool = False,
-        load_predtrain: bool = True
-        ):
+        epoch: int = 15, is_fine_tuning: bool = True, is_generating: bool = False,
+        load_predtrain: bool = True, vocab_size: int = 600, max_length: int = 128,
+        bs: int = 100, n_answers: int = 1000
+        ) -> None:
     """
-    Run training and generation for mLSTM-AutoEncoder
+    Run training and generation for mLSTM-AutoEncoder. Save answer
+    in txt format
+
+    Parameters
+    __________
+    conf_encoder: str
+        Path to config file for encoder
+    conf_decoder: str
+        Path to config file for decoder
+    dataset_path: str
+        Path to dataset in csv format. SMILES string in column 'output'
+    epoch: int
+        Number of epoch
+    is_fine_tuning: bool
+        True if need to tune
+    is_generating:
+        True if need to run inference
+    load_predtrin:
+        True if need to load weights
+    vocab_size: int
+        vocab_sizw of tokenizer
+    max_lenght: int
+        Max len of sequence
+    bs: int
+        Batch size
+    n_answers: int
+        Number of generated answers
     """
     if is_fine_tuning:
         tokenizer = make_tokenizer(
-            data_path=dataset_path, max_length=128, vocab_size=600
+            data_path=dataset_path, max_length=max_length, vocab_size=vocab_size
         )
         train_ds = SmilesDataset(tokenizer, dataset_path)
         dataloader = DataLoader(
-            train_ds, batch_size=100, shuffle=True
+            train_ds, batch_size=bs, shuffle=True
         )
         model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
 
@@ -53,12 +84,10 @@ def run_auto_encoder(
                 inputs = inputs.to(DEVICE)
                 reconstructed, kld = model(inputs)
 
-                if math.isnan(model.state_dict()['encoder.xlstm.xlstm_block_stack.blocks.2.xlstm.proj_down.weight'][0][0].item()):
-                    print('FOUND NAN in weights of model')
-                    break
+                # check for problem with optimizer. Can be remove
                 if math.isnan(reconstructed[0][0][0].item()):
-                    print('FOUND NAN in weights of model')
-                    continue
+                    print('FOUND NAN in output of model')
+                    break
 
                 loss, recon_loss, kld = metrics.loss_function(reconstructed, inputs, kld, beta=1.0)
 
@@ -78,15 +107,15 @@ def run_auto_encoder(
         model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
         model.load_state_dict(torch.load("xLSTM/weights/xlstm_autoencoder.pth", map_location=DEVICE))
 
-        res = model.decoder.generate_new_data(1000)
+        res = model.decoder.generate_new_data(n_answers)
         tokenizer = make_tokenizer(
-            data_path=dataset_path, max_length=64, vocab_size=600
+            data_path=dataset_path, max_length=max_length, vocab_size=600
         )
         for r in res:
             sampled_ids = torch.argmax(torch.nn.functional.softmax(r), dim=-1)
             decode_store.append(tokenizer.decode([i for i in sampled_ids.tolist()]))
 
-        with open(f"xLSTM/examples/generated_molstxt", "w") as f:
+        with open(f"xLSTM/examples/generated_mols.txt", "w") as f:
             for mol in decode_store:
                 f.write(mol + "\n")
 
@@ -97,7 +126,7 @@ def run_encoder_decoder(
     is_generating: bool = True,
     dataset_path: str = None,
     num_answers: int = 500,
-    num_epoch: int = 50
+    num_epoch: int = 15
 ):
     """
     Run training or generation
@@ -130,7 +159,7 @@ def run_encoder_decoder(
         model.train(train_loader, num_epoch)
 
     if is_generating:
-        model_gen = Generator(cfg_path)
+        model_gen = EncoderDecoderGenerator(cfg_path)
         results = model_gen.generate(start_token="[PAD]", num_answers=num_answers)
         [print(result) for result in results]
         with open(f"xLSTM/examples/out_74ep.txt", "w") as f:
@@ -139,10 +168,10 @@ def run_encoder_decoder(
 
 
 if __name__ == "__main__":
-    data_path = "/home/alina/data/projects/2/SmilesTuneLLM/xLSTM/chembl_alpaca.txt"
+    data_path = "xLSTM/chembl_alpaca.txt"
     cfg_path = "xLSTM/cfg//mLSTM_cfg.yaml"
 
     # run AutoEncoder (mLSTM encoder + mLSTM decoder)
-    encod_conf = '/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_encoder_cfg.yaml'
-    decode_conf = '/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_decoder_cfg.yaml'
+    encod_conf = 'xLSTM/cfg/mLSTM_encoder_cfg.yaml'
+    decode_conf = '/xLSTM/cfg/mLSTM_decoder_cfg.yaml'
     run_auto_encoder(encod_conf, decode_conf, data_path, is_fine_tuning=True)
