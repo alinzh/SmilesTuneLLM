@@ -51,10 +51,11 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.fc = nn.Linear(latent_dim, hidden_dim)
         self.lstm = xLSTMLMModel(make_conf(conf_decoder)).to(DEVICE)
-        self.output_dim = output_dim
+        self.linear = nn.Linear(latent_dim, output_dim)
 
     def forward(self, x):
         output = self.lstm(x)
+        output = self.linear(output)
         return output
 
     def generate_new_data(self, num_samples: int, latent_dim: int = 64):
@@ -66,10 +67,10 @@ class Decoder(nn.Module):
 
 
 class AutoEncoder(nn.Module):
-    def __init__(self, conf_encoder: str, conf_decoder: str):
+    def __init__(self, conf_encoder: str, conf_decoder: str, hidden_dim = 64, seq_len = 128, num_classes = 600):
         super(AutoEncoder, self).__init__()
-        self.encoder = Encoder(conf_encoder, 64)
-        self.decoder = Decoder(conf_decoder, 128, 64, 600)
+        self.encoder = Encoder(conf_encoder, hidden_dim)
+        self.decoder = Decoder(conf_decoder, seq_len, hidden_dim, num_classes)
 
     def reparameterize(self, mu, log_var):
         std = torch.exp(0.5 * log_var)
@@ -141,7 +142,7 @@ class EncoderDecoder():
         torch.save(self.model.state_dict(), "xLSTM/weights/xlstm_parms.pth")
 
 
-class Generator(EncoderDecoder):
+class EncoderDecoderGenerator(EncoderDecoder):
     """Generator of sequence"""
 
     def __init__(self, cfg: str, weights_path: str = "xLSTM/weights/xlstm_parms.pth"):
