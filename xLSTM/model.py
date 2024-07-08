@@ -57,10 +57,10 @@ class Decoder(nn.Module):
         output = self.lstm(x)
         return output
 
-    def generate_new_data(self, num_samples: int, latent_dim: int = 128):
+    def generate_new_data(self, num_samples: int, latent_dim: int = 64):
         with torch.no_grad():
             # make samples from std
-            z = torch.randn(num_samples, latent_dim).to(DEVICE)
+            z = torch.randn(num_samples, 128, latent_dim).to(DEVICE)
             generated_data = self.forward(z)
         return generated_data
 

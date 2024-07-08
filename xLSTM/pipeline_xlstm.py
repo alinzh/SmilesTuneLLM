@@ -1,13 +1,11 @@
 import os
 import sys
-
 sys.path.append(os.getcwd())
+import math
 
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-import torch.nn as nn
 
 from xLSTM.tokenizer import make_tokenizer
 from xLSTM.model import EncoderDecoder, Generator, AutoEncoder
@@ -19,9 +17,10 @@ DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("
 
 
 def run_auto_encoder(
-        conf_encoder: str, conf_decoder: str, dataset_path: str,
-        epoch: int = 100, is_fine_tuning: bool = True, is_generating: bool = True
-):
+        conf_encoder: str, conf_decoder: str, dataset_path: str, 
+        epoch: int = 1, is_fine_tuning: bool = True, is_generating: bool = False,
+        load_predtrain: bool = True
+        ):
     """
     Run training and generation for mLSTM-AutoEncoder
     """
@@ -31,21 +30,35 @@ def run_auto_encoder(
         )
         train_ds = SmilesDataset(tokenizer, dataset_path)
         dataloader = DataLoader(
-            train_ds, batch_size=128, shuffle=False
+            train_ds, batch_size=100, shuffle=True
         )
-
         model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
-        model.load_state_dict(torch.load("xLSTM/weights/xlstm_autoencoder.pth", map_location=DEVICE))
+
+        if load_predtrain:
+            model_dict_pred_train = torch.load("xLSTM/weights/xlstm_autoencoder.pth", map_location=torch.device(DEVICE))
+            model_dict = model.state_dict()
+            dict_matched = [i for i,k in zip(model_dict_pred_train,model_dict) if model_dict_pred_train[i].shape==model_dict[k].shape]
+            test_dict = {i:model_dict_pred_train[i] for i in dict_matched}
+            model_dict.update(test_dict)
+            model.load_state_dict(model_dict)
+
         cnt, mean_loss = 0, 0
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.0006, weight_decay=5e-4)
+        optimizer = torch.optim.RMSprop(model.parameters(), lr=0.001, weight_decay=5e-4)
 
         for i in tqdm(range(epoch), desc="Epochs"):
-            for batch_num, inputs in enumerate(dataloader):
+            for _, inputs in enumerate(dataloader):
                 model.train(), optimizer.zero_grad()
 
                 inputs = inputs.to(DEVICE)
                 reconstructed, kld = model(inputs)
+
+                if math.isnan(model.state_dict()['encoder.xlstm.xlstm_block_stack.blocks.2.xlstm.proj_down.weight'][0][0].item()):
+                    print('FOUND NAN in weights of model')
+                    break
+                if math.isnan(reconstructed[0][0][0].item()):
+                    print('FOUND NAN in weights of model')
+                    continue
 
                 loss, recon_loss, kld = metrics.loss_function(reconstructed, inputs, kld, beta=1.0)
 
@@ -54,8 +67,8 @@ def run_auto_encoder(
 
                 mean_loss += loss.item()
                 cnt += 1
-
-                if cnt % 100 == 0:
+                
+                if cnt % 10 == 0:
                     print(
                         f"--------Mean loss for step {cnt} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld}--------"
                     )
@@ -65,28 +78,26 @@ def run_auto_encoder(
         model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
         model.load_state_dict(torch.load("xLSTM/weights/xlstm_autoencoder.pth", map_location=DEVICE))
 
-        res = model.decoder.generate_new_data(10000)
+        res = model.decoder.generate_new_data(1000)
         tokenizer = make_tokenizer(
-            data_path=dataset_path, max_length=128, vocab_size=600
+            data_path=dataset_path, max_length=64, vocab_size=600
         )
         for r in res:
-            logits = r / 5
-            # Sample from the distribution
-            sampled_ids = torch.multinomial(torch.nn.functional.softmax(logits, dim=-1).squeeze(), num_samples=1)
-            decode_store.append(tokenizer.decode([i[0] for i in sampled_ids.tolist()]))
+            sampled_ids = torch.argmax(torch.nn.functional.softmax(r), dim=-1)
+            decode_store.append(tokenizer.decode([i for i in sampled_ids.tolist()]))
 
-        with open(f"xLSTM/examples/generated_mols.txt", "w") as f:
+        with open(f"xLSTM/examples/generated_molstxt", "w") as f:
             for mol in decode_store:
                 f.write(mol + "\n")
 
 
 def run_encoder_decoder(
-        cfg_path: str,
-        is_fine_tuning: bool = False,
-        is_generating: bool = True,
-        dataset_path: str = None,
-        num_answers: int = 500,
-        num_epoch: int = 50
+    cfg_path: str,
+    is_fine_tuning: bool = False,
+    is_generating: bool = True,
+    dataset_path: str = None,
+    num_answers: int = 500,
+    num_epoch: int = 50
 ):
     """
     Run training or generation
@@ -131,7 +142,7 @@ if __name__ == "__main__":
     data_path = "/home/alina/data/projects/2/SmilesTuneLLM/xLSTM/chembl_alpaca.txt"
     cfg_path = "xLSTM/cfg//mLSTM_cfg.yaml"
 
-    # run AutoEncoder (LSTM encoder + mLSTM decoder)
+    # run AutoEncoder (mLSTM encoder + mLSTM decoder)
     encod_conf = '/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_encoder_cfg.yaml'
     decode_conf = '/data/alina_files/projects/2/SmilesTuneLLM/xLSTM/cfg/mLSTM_decoder_cfg.yaml'
-    run_auto_encoder(encod_conf, decode_conf, data_path)
+    run_auto_encoder(encod_conf, decode_conf, data_path, is_fine_tuning=True)
