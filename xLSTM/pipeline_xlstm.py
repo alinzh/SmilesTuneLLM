@@ -112,7 +112,9 @@ def run_auto_encoder(
                         state[k] = v.cuda()
         else:
             optimizer = torch.optim.RMSprop(model.parameters(), lr=0.005, weight_decay=5e-4)
-
+            if parallels:
+                model = torch.nn.DataParallel(model)
+                model.to(DEVICE)
         cnt, mean_loss, loss_history = 0, 0, []
 
         for i in tqdm(range(epoch), desc="Epochs"):
