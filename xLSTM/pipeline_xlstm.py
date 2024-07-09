@@ -24,7 +24,7 @@ def run_auto_encoder(
         conf_encoder: str, conf_decoder: str, dataset_path: str, 
         epoch: int = 15, is_fine_tuning: bool = True, is_generating: bool = False,
         load_predtrain: bool = True, vocab_size: int = 600, max_length: int = 128,
-        bs: int = 100, n_answers: int = 1000
+        bs: int = 100, n_answers: int = 1000, parallels: bool = False, chkp_path: str = None
         ) -> None:
     """
     Run training and generation for mLSTM-AutoEncoder. Save answer
@@ -47,13 +47,17 @@ def run_auto_encoder(
     load_predtrin:
         True if need to load weights
     vocab_size: int
-        vocab_sizw of tokenizer
+        vocab_size of tokenizer
     max_lenght: int
         Max len of sequence
     bs: int
         Batch size
     n_answers: int
         Number of generated answers
+    parallels: bool
+        True, if need to parallel between some GPU
+    chkp_path: str, optional
+        Path to wights, if need to load pretrained model
     """
     if is_fine_tuning:
         tokenizer = make_tokenizer(
@@ -66,12 +70,15 @@ def run_auto_encoder(
         model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
 
         if load_predtrain:
-            model_dict_pred_train = torch.load("xLSTM/weights/xlstm_autoencoder.pth", map_location=torch.device(DEVICE))
-            model_dict = model.state_dict()
-            dict_matched = [i for i,k in zip(model_dict_pred_train,model_dict) if model_dict_pred_train[i].shape==model_dict[k].shape]
-            test_dict = {i:model_dict_pred_train[i] for i in dict_matched}
-            model_dict.update(test_dict)
-            model.load_state_dict(model_dict)
+            if parallels:
+                model_dict_pred_train = torch.load(chkp_path)
+                model.load_state_dict(model_dict_pred_train)
+                model= torch.nn.DataParallel(model)
+                model.to(DEVICE)
+            else:
+                model_dict_pred_train = torch.load(chkp_path, map_location=torch.device(DEVICE))
+                model.load_state_dict(model_dict_pred_train)
+            
 
         cnt, mean_loss = 0, 0
 
@@ -91,6 +98,9 @@ def run_auto_encoder(
 
                 loss, recon_loss, kld = metrics.loss_function(reconstructed, inputs, kld, beta=1.0)
 
+                if parallels:
+                    loss = loss.mean()
+
                 loss.backward()
                 optimizer.step()
 
@@ -98,14 +108,20 @@ def run_auto_encoder(
                 cnt += 1
                 
                 if cnt % 10 == 0:
-                    print(
-                        f"--------Mean loss for step {cnt} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld}--------"
-                    )
-                    torch.save(model.state_dict(), "xLSTM/weights/xlstm_autoencoder.pth")
+                    if parallels:
+                        print(
+                        f"--------Mean loss for step {cnt} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld.mean().item()}--------"
+                        )
+                        torch.save(model.module.state_dict(), f"xLSTM/weights/xlstm_autoencoder_ep{20+i+1}_step{cnt}.pth")
+                    else:
+                        print(
+                            f"--------Mean loss for step {cnt} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld}--------"
+                        )
+                        torch.save(model.state_dict(), f"xLSTM/weights/xlstm_autoencoder_ep{20+i+1}_step{cnt}.pth")
     if is_generating:
         decode_store = []
         model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
-        model.load_state_dict(torch.load("xLSTM/weights/xlstm_autoencoder.pth", map_location=DEVICE))
+        model.load_state_dict(torch.load(chkp_path, map_location=DEVICE))
 
         res = model.decoder.generate_new_data(n_answers)
         tokenizer = make_tokenizer(
@@ -173,5 +189,5 @@ if __name__ == "__main__":
 
     # run AutoEncoder (mLSTM encoder + mLSTM decoder)
     encod_conf = 'xLSTM/cfg/mLSTM_encoder_cfg.yaml'
-    decode_conf = '/xLSTM/cfg/mLSTM_decoder_cfg.yaml'
-    run_auto_encoder(encod_conf, decode_conf, data_path, is_fine_tuning=True)
+    decode_conf = 'xLSTM/cfg/mLSTM_decoder_cfg.yaml'
+    run_auto_encoder(encod_conf, decode_conf, data_path, is_fine_tuning=False, is_generating=True)
