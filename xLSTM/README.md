@@ -1,9 +1,7 @@
 ## Minimal Installation for mLSTM
 
-Clone this repo.
-After that clone repo with xLSTM model:
+Make enviroment
 ```bash
-git clone https://github.com/NX-AI/xlstm.git
 cd xlstm
 pip install -e .
 ```
