@@ -51,11 +51,9 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.fc = nn.Linear(latent_dim, hidden_dim)
         self.lstm = xLSTMLMModel(make_conf(conf_decoder)).to(DEVICE)
-        self.linear = nn.Linear(latent_dim, output_dim)
 
     def forward(self, x):
         output = self.lstm(x)
-        output = self.linear(output)
         return output
 
     def generate_new_data(self, num_samples: int, latent_dim: int = 64):
