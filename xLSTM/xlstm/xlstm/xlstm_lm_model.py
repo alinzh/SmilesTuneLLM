@@ -30,8 +30,6 @@ class xLSTMLMModel(WeightDecayOptimGroupMixin, nn.Module):
 
         self.token_embedding = nn.Embedding(num_embeddings=config.vocab_size, embedding_dim=config.embedding_dim)
         self.emb_dropout = nn.Dropout(config.dropout) if config.add_embedding_dropout else nn.Identity()
-        # HARDCODE HERE! ATTENTION!
-        self.linear = nn.Linear(64, 600) 
 
         self.lm_head = nn.Linear(
             in_features=config.embedding_dim,
@@ -52,7 +50,6 @@ class xLSTMLMModel(WeightDecayOptimGroupMixin, nn.Module):
     def forward(self, idx: torch.Tensor) -> torch.Tensor:
         if type(idx.tolist()[0][0]) != int:
             x = self.xlstm_block_stack(idx)
-            x = self.linear(x)
         else:
             x = self.token_embedding(idx)
             x = self.emb_dropout(x)

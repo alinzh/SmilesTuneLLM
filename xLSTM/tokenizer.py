@@ -16,7 +16,8 @@ DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("
 
 
 def make_tokenizer(
-    data_path: str = None, max_length: int = 128, vocab_size: int = 600, path_to_saved: str = 'xLSTM/tokenizer.pickle'
+    data_path: str = None, max_length: int = 101, vocab_size: int = 140, path_from: str = None,
+    path_to_saved: str = 'xLSTM/tokenizer.pickle'
 ) -> Tokenizer:
     """
     Create a tokenizer
@@ -36,8 +37,8 @@ def make_tokenizer(
     -------
     tokenizer: Tokenizer
     """
-    if path_to_saved:
-        with open(path_to_saved, "rb") as f:
+    if path_from:
+        with open(path_from, "rb") as f:
             tokenizer = pickle.load(f)
             return tokenizer
 

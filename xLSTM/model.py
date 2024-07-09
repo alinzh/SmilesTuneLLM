@@ -32,13 +32,13 @@ def make_conf(path: str) -> xLSTMLMModelConfig:
 
 
 class Encoder(nn.Module):
-    def __init__(self, conf_encoder, hidden_dim=128, latent_dim=64):
+    def __init__(self, conf_encoder, hidden_dim=101, latent_dim=128):
         super(Encoder, self).__init__()
         self.xlstm = xLSTMLMModel(make_conf(conf_encoder)).to(DEVICE)
 
         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
         self.fc_log_var = nn.Linear(hidden_dim, latent_dim)
-
+        
     def forward(self, x):
         x = self.xlstm(x)
         mu = self.fc_mu(x)
@@ -47,25 +47,27 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, conf_decoder, latent_dim, hidden_dim, output_dim):
+    def __init__(self, conf_decoder, latent_dim, hidden_dim = 101, output_dim = 140):
         super(Decoder, self).__init__()
         self.fc = nn.Linear(latent_dim, hidden_dim)
         self.lstm = xLSTMLMModel(make_conf(conf_decoder)).to(DEVICE)
+        self.linear = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
-        output = self.lstm(x)
+        x = self.lstm(x)
+        output = self.linear(x)
         return output
 
-    def generate_new_data(self, num_samples: int, latent_dim: int = 64):
+    def generate_new_data(self, num_samples: int, latent_dim: int = 128):
         with torch.no_grad():
             # make samples from std
-            z = torch.randn(num_samples, 128, latent_dim).to(DEVICE)
+            z = torch.randn(num_samples, 101, latent_dim).to(DEVICE)
             generated_data = self.forward(z)
         return generated_data
 
 
 class AutoEncoder(nn.Module):
-    def __init__(self, conf_encoder: str, conf_decoder: str, hidden_dim = 64, seq_len = 128, num_classes = 600):
+    def __init__(self, conf_encoder: str, conf_decoder: str, hidden_dim = 128, seq_len = 101, num_classes = 140):
         super(AutoEncoder, self).__init__()
         self.encoder = Encoder(conf_encoder, hidden_dim)
         self.decoder = Decoder(conf_decoder, seq_len, hidden_dim, num_classes)
