@@ -25,12 +25,12 @@ DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("
 
 
 def val(model, tokenizer, parallel: bool):
-    model.eval(), torch.no_grad() 
+    model.eval() 
     decode_store = []
     if parallel:
-        res = model.module.decoder.generate_new_data(300)
+        res = model.module.decoder.generate_new_data(500)
     else:
-        res = model.decoder.generate_new_data(300)
+        res = model.decoder.generate_new_data(500)
 
     for r in res:
         sampled_ids = torch.argmax(torch.nn.functional.softmax(r), dim=-1)
@@ -48,7 +48,8 @@ def run_auto_encoder(
         conf_encoder: str, conf_decoder: str, dataset_path: str, 
         epoch: int = 30, is_fine_tuning: bool = True, is_generating: bool = False,
         load_predtrain: bool = False, vocab_size: int = 140, max_length: int = 101,
-        bs: int = 100, n_answers: int = 1000, parallels: bool = False, chkp_path: str = None
+        bs: int = 100, n_answers: int = 1000, parallels: bool = False, chkp_path: str = None, old_step = 0,
+        accumulation_steps = 4
         ) -> None:
     """
     Run training and generation for mLSTM-AutoEncoder. Save answer
@@ -85,7 +86,7 @@ def run_auto_encoder(
     """
     if is_fine_tuning:
         tokenizer = make_tokenizer(
-            data_path=dataset_path, max_length=max_length, vocab_size=vocab_size, 
+            data_path=dataset_path, max_length=max_length, vocab_size=vocab_size,
             path_from='xLSTM/tokenizer.pickle'
         )
         train_ds = SmilesDataset(tokenizer, dataset_path)
@@ -111,15 +112,17 @@ def run_auto_encoder(
                     if isinstance(v, torch.Tensor):
                         state[k] = v.cuda()
         else:
-            optimizer = torch.optim.RMSprop(model.parameters(), lr=0.005, weight_decay=5e-4)
+            optimizer = torch.optim.AdamW(model.parameters(), weight_decay=5e-4)
             if parallels:
                 model = torch.nn.DataParallel(model)
                 model.to(DEVICE)
-        cnt, mean_loss, loss_history = 0, 0, []
+
+        cnt, mean_loss = 0, 0
+        old_step = old_step
 
         for i in tqdm(range(epoch), desc="Epochs"):
             for _, inputs in enumerate(dataloader):
-                model.train(), optimizer.zero_grad()
+                model.train()
 
                 inputs = inputs.to(DEVICE)
                 reconstructed, kld = model(inputs)
@@ -129,52 +132,84 @@ def run_auto_encoder(
                     print('FOUND NAN in output of model')
                     break
 
-                loss, recon_loss, kld = metrics.loss_function(reconstructed, inputs, kld, beta=0.5)
+                loss, recon_loss, kld = metrics.loss_function(reconstructed, inputs, kld, beta=1.0)
 
                 if parallels:
                     loss = loss.mean()
 
-                loss.backward() 
-                optimizer.step()
+                loss.backward()
+                
+                if (i + 1) % accumulation_steps == 0:
+                    optimizer.step()  
+                    optimizer.zero_grad()  
 
                 mean_loss += loss.item() 
-                loss_history.append(loss.item())
                 cnt += 1
+                old_step += 1
                 
                 if cnt % 100 == 0:
                     if parallels:
                         print(
-                        f"--------Mean loss for step {cnt} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld.mean().item()}--------"
+                        f"--------Mean loss for step {old_step} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld.mean().item()}--------"
                         )
                         torch.save({
                                 'epoch': epoch,
                                 'model_state_dict': model.module.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
-                                'train_loss_history': loss_history,
-                                }, f"xLSTM/weights/xlstm_autoencoder_ep{i+1}_step{cnt}.pth")
+                                }, f"xLSTM/weights/xlstm_autoencoder_ep{i+1}_step{old_step}.pth")
                     else:
                         print(
-                            f"--------Mean loss for step {cnt} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld}--------"
+                            f"--------Mean loss for step {old_step} is {mean_loss / cnt}, Recon_loss id {recon_loss}, KLD is {kld}--------"
                         )
                         torch.save({
                                 'epoch': epoch,
                                 'model_state_dict': model.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
-                                'train_loss_history': loss_history,
-                                }, f"xLSTM/weights/xlstm_autoencoder_ep{i+1}_step{cnt}.pth")
-                    writer.add_scalar("Loss", mean_loss / cnt, cnt)
-                    writer.add_scalar("Recon loss", recon_loss, cnt)
-                    writer.add_scalar("KLD", kld.mean().item(), cnt)
-                if cnt % 2000 == 0:
+                                }, f"xLSTM/weights/xlstm_autoencoder_ep{i+1}_step{old_step}.pth")
+                    writer.add_scalar("Loss", mean_loss / cnt, old_step)
+                    writer.add_scalar("Recon loss", recon_loss, old_step)
+                    writer.add_scalar("KLD", kld.mean().item(), old_step)
+                if cnt % 1000 == 0:
                     valid, nov, _ = val(model, tokenizer, parallels)
-                    writer.add_scalar("Valid mols", valid, cnt)
-                    writer.add_scalar("New mols", nov, cnt)
+                    writer.add_scalar("Valid mols", valid, old_step)
+                    writer.add_scalar("New mols", nov, old_step)
+            # if number of steps less then gradient store
+            if (i + 1) % accumulation_steps != 0:
+                optimizer.step()
+                optimizer.zero_grad()
+            writer.add_scalar("Loss per epoch", mean_loss / cnt, i)
+
                 
     if is_generating:
-        model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
-        model.load_state_dict(torch.load(chkp_path, map_location=DEVICE))
+        decode_store = []
+        
+        if parallels:
+            model = AutoEncoder(conf_encoder, conf_decoder)
+            model_dict_pred_train = torch.load(chkp_path)
+            model.load_state_dict(model_dict_pred_train['model_state_dict'])
+            model = torch.nn.DataParallel(model)
+            model.to(DEVICE)
+            res = model.module.decoder.generate_new_data(n_answers)
+        else:
+            model = AutoEncoder(conf_encoder, conf_decoder).to(DEVICE)
+            model.load_state_dict(torch.load(chkp_path, map_location=DEVICE))
+            res = model.decoder.generate_new_data(n_answers)
 
-        valid, nov, dup = run_measuring_metrics.main(model, tokenizer)
+        
+        tokenizer = make_tokenizer(
+            data_path=dataset_path, max_length=max_length, vocab_size=vocab_size,
+            path_from='xLSTM/tokenizer.pickle'
+        )
+        
+        for r in res:
+            sampled_ids = torch.argmax(torch.nn.functional.softmax(r), dim=-1)
+            decode_store.append(tokenizer.decode([i for i in sampled_ids.tolist()]))
+
+        with open(f"xLSTM/examples/generated_mols.txt", "w") as f:
+            for mol in decode_store:
+                f.write(mol + "\n")
+
+        valid, nov, dup = run_measuring_metrics.main()
 
 def run_encoder_decoder(
     cfg_path: str,
@@ -231,6 +266,14 @@ if __name__ == "__main__":
     decode_conf = 'xLSTM/cfg/mLSTM_decoder_cfg.yaml'    
     run_auto_encoder(
         encod_conf, decode_conf, data_path, 
-        is_fine_tuning=True, is_generating=False, epoch = 50,
-        load_predtrain=False, chkp_path=None
+        is_fine_tuning=True, is_generating=False, epoch = 100,
+        load_predtrain=False,
+        parallels=True, bs=120
     )
+    
+    # uncomment for inference
+    # run_auto_encoder(
+    #     encod_conf, decode_conf, data_path, 
+    #     is_fine_tuning=False, is_generating=True, parallels=True,
+    #     chkp_path='/root/projects/SmilesTuneLLM/xLSTM/weights/xlstm_autoencoder_ep1_step4150.pth'
+    # )
