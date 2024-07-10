@@ -1,6 +1,6 @@
 vocab_size: 140
 context_length: 101
-num_blocks: 8
+num_blocks: 24
 embedding_dim: 128
 tie_weights: false
 weight_decay_on_embedding: false
